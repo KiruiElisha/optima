@@ -227,3 +227,35 @@ app_license = "mit"
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
 
+# DocType JS
+doctype_js = {
+    "Optima Settings": "public/js/optima_settings.js",
+    "Sales Order": "public/js/sales_order.js"
+}
+
+# Required apps
+required_apps = ["erpnext"]
+
+# Document Events
+doc_events = {
+    "Sales Order": {
+        "on_submit": "optima.optima.doc_events.sales_order.on_submit"
+    }
+    # Add more document events as needed
+}
+
+# Scheduled Tasks
+scheduler_events = {
+    "daily": [
+        "optima.optima.utils.sync.daily_sync"
+    ],
+    "hourly": [
+        "optima.optima.utils.sync.hourly_sync"
+    ],
+    "cron": {
+        "*/10 * * * *": [
+            "optima.optima.utils.sync.check_optima_sync_status"
+        ]
+    }
+}
+
