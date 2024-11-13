@@ -84,13 +84,13 @@
   {
    "default": "Pending",
    "fieldname": "status",
-   "fieldtype": "Select",
+   "fieldtype": "Data",
    "label": "Status",
-   "options": "Pending\nSynced\nFailed"
+   "options": "Pending\nCompleted\nFailed"
   },
   {
    "fieldname": "sync_status",
-   "fieldtype": "Select",
+   "fieldtype": "Data",
    "label": "Sync Status",
    "options": "Pending\nIn Progress\nCompleted\nFailed",
    "read_only": 1
@@ -213,7 +213,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2024-11-12 08:36:43.555962",
+ "modified": "2024-11-13 12:27:49.208036",
  "modified_by": "Administrator",
  "module": "Optima",
  "name": "Optima Order",

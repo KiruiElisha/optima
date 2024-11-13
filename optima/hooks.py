@@ -259,3 +259,34 @@ scheduler_events = {
     }
 }
 
+# Fixtures for Custom Fields and Client Scripts
+fixtures = [
+    {
+        "dt": "Custom Field",
+        "filters": [
+            [
+                "name",
+                "in",
+                [
+                    "Sales Order-optima_section",
+                    "Sales Order-custom_send_to_optima",
+                    "Sales Order-optima_column_break",
+                    "Sales Order-custom_optima_order",
+                    "Sales Order-custom_optima_sync_status",
+                    "Sales Order-custom_optima_sync_error"
+                ]
+            ]
+        ]
+    },
+    {
+        "dt": "Client Script",
+        "filters": [
+            [
+                "name",
+                "=",
+                "Optima Sales Order"
+            ]
+        ]
+    }
+]
+

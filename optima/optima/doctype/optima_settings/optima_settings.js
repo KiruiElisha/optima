@@ -148,6 +148,64 @@ frappe.ui.form.on("Optima Settings", {
 			});
 		});
 
+		frm.add_custom_button(__('Dump Database Schema'), function() {
+			let d = new frappe.ui.Dialog({
+				title: 'Select Database to Dump',
+				fields: [
+					{
+						label: 'Database',
+						fieldname: 'database',
+						fieldtype: 'Select',
+						options: [],
+						reqd: 1
+					}
+				],
+				primary_action_label: 'Dump Schema',
+				primary_action(values) {
+					frappe.call({
+						method: 'dump_database_schema',
+						doc: frm.doc,
+						args: {
+							database: values.database
+						},
+						freeze: true,
+						freeze_message: __('Generating database schema...'),
+						callback: function(r) {
+							if (r.message && r.message.success) {
+								// Download the generated file
+								window.open(r.message.file_url);
+								frappe.msgprint({
+									title: __('Success'),
+									indicator: 'green',
+									message: __('Database schema has been generated successfully.')
+								});
+							} else {
+								frappe.msgprint({
+									title: __('Failed'),
+									indicator: 'red',
+									message: r.message.message || __('Failed to generate database schema.')
+								});
+							}
+							d.hide();
+						}
+					});
+				}
+			});
+
+			// Fetch databases to populate the select field
+			frappe.call({
+				method: 'get_databases',
+				doc: frm.doc,
+				callback: function(r) {
+					if (r.message && r.message.success) {
+						d.set_df_property('database', 'options', r.message.databases);
+					}
+				}
+			});
+
+			d.show();
+		}).addClass('btn-primary');
+
 		if (!document.getElementById('optima-settings-style')) {
 			const style = document.createElement('style');
 			style.id = 'optima-settings-style';

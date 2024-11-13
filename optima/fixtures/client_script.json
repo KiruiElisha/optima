@@ -1,0 +1,13 @@
+[
+ {
+  "docstatus": 0,
+  "doctype": "Client Script",
+  "dt": "Sales Order",
+  "enabled": 1,
+  "modified": "2024-11-12 15:31:28.277961",
+  "module": "Optima",
+  "name": "Optima Sales Order",
+  "script": "frappe.ui.form.on('Sales Order', {\r\n    refresh: function(frm) {\r\n        // Add retry button for failed syncs\r\n        if (frm.doc.custom_optima_sync_status === \"Failed\") {\r\n            \r\n            frm.add_custom_button(__('Retry Optima Sync'), function() {\r\n                frappe.confirm(\r\n                    __('Are you sure you want to retry syncing this order to Optima?'),\r\n                    function() {\r\n                        // Clear previous error\r\n                        frm.set_value('custom_optima_sync_error', '');\r\n                        frm.set_value('custom_optima_sync_status', 'Pending');\r\n                        \r\n                        frappe.call({\r\n                            method: 'optima.optima.utils.order_sync.enqueue_optima_order_sync',\r\n                            args: {\r\n                                sales_order: frm.doc.name\r\n                            },\r\n                            freeze: true,\r\n                            freeze_message: __('Queuing sync...'),\r\n                            callback: function(r) {\r\n                                frm.reload_doc();\r\n                            }\r\n                        });\r\n                    }\r\n                );\r\n            }, __('Actions'));\r\n        }\r\n        \r\n        // Show sync error if any\r\n        if (frm.doc.custom_optima_sync_error) {\r\n            frm.dashboard.add_comment(__('Optima Sync Error: {0}', [frm.doc.custom_optima_sync_error]), 'red');\r\n        }\r\n        \r\n        // Show sync status\r\n        if (frm.doc.custom_optima_sync_status) {\r\n            let indicator = {\r\n                'Pending': 'orange',\r\n                'Synced': 'green',\r\n                'Failed': 'red'\r\n            }[frm.doc.custom_optima_sync_status] || 'gray';\r\n            \r\n            frm.dashboard.add_comment(\r\n                __('Optima Sync Status: {0}', [frm.doc.custom_optima_sync_status]),\r\n                indicator\r\n            );\r\n        }\r\n    },\r\n    \r\n    custom_send_to_optima: function(frm) {\r\n        // Clear sync status when toggling send to optima\r\n        if (!frm.doc.custom_send_to_optima) {\r\n            frm.set_value('custom_optima_sync_status', 'Not Synced');\r\n            frm.set_value('custom_optima_sync_error', '');\r\n        }\r\n    }\r\n}); ",
+  "view": "Form"
+ }
+]

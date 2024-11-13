@@ -168,3 +168,164 @@ class OptimaSettings(Document):
 				"success": False,
 				"message": f"Failed to fetch table fields: {str(e)}"
 			}
+	@frappe.whitelist()
+	def get_table_relationships(self, database, table):
+		"""Get relationships for a specific table, identifying foreign key constraints."""
+		try:
+			conn = self.get_connection(with_database=False)
+			cursor = conn.cursor()
+			cursor.execute(f"USE {database}")
+			cursor.execute("""
+				SELECT 
+					fk.name AS foreign_key_name,
+					tp.name AS parent_table,
+					cp.name AS parent_column,
+					tr.name AS referenced_table,
+					cr.name AS referenced_column
+				FROM sys.foreign_keys AS fk
+				INNER JOIN sys.foreign_key_columns AS fkc ON fk.object_id = fkc.constraint_object_id
+				INNER JOIN sys.tables AS tp ON fk.parent_object_id = tp.object_id
+				INNER JOIN sys.columns AS cp ON fkc.parent_column_id = cp.column_id AND tp.object_id = cp.object_id
+				INNER JOIN sys.tables AS tr ON fk.referenced_object_id = tr.object_id
+				INNER JOIN sys.columns AS cr ON fkc.referenced_column_id = cr.column_id AND tr.object_id = cr.object_id
+				WHERE tp.name = %s
+				ORDER BY foreign_key_name
+			""", (table,))
+			
+			relationships = [
+				{
+					'foreign_key_name': row[0],
+					'parent_table': row[1],
+					'parent_column': row[2],
+					'referenced_table': row[3],
+					'referenced_column': row[4]
+				}
+				for row in cursor.fetchall()
+			]
+			
+			cursor.close()
+			conn.close()
+			
+			return {
+				"success": True,
+				"relationships": relationships
+			}
+		except Exception as e:
+			return {
+				"success": False,
+				"message": f"Failed to fetch relationships: {str(e)}"
+			}
+
+	@frappe.whitelist()
+	def dump_database_schema(self, database):
+		"""Generate a detailed schema dump of the database including tables, fields, and relationships."""
+		try:
+			conn = self.get_connection(with_database=False)
+			cursor = conn.cursor()
+			cursor.execute(f"USE {database}")
+			
+			# Get all tables
+			cursor.execute("""
+				SELECT TABLE_NAME 
+				FROM INFORMATION_SCHEMA.TABLES 
+				WHERE TABLE_TYPE = 'BASE TABLE'
+				ORDER BY TABLE_NAME
+			""")
+			tables = [row[0] for row in cursor.fetchall()]
+			
+			# Prepare the schema content
+			content = f"Database Schema: {database}\n"
+			content += "=" * 50 + "\n\n"
+			
+			for table in tables:
+				content += f"Table: {table}\n"
+				content += "-" * 50 + "\n\n"
+				
+				# Get fields
+				cursor.execute("""
+					SELECT 
+						c.name AS column_name,
+						t.name AS data_type,
+						c.max_length,
+						c.is_nullable,
+						CASE WHEN i.index_id IS NOT NULL AND i.is_primary_key = 1 
+							THEN 1 ELSE 0 END AS is_primary_key,
+						CASE WHEN i.index_id IS NOT NULL AND i.is_unique = 1 
+							THEN 1 ELSE 0 END AS is_unique
+					FROM sys.columns c
+					INNER JOIN sys.types t ON c.user_type_id = t.user_type_id
+					LEFT JOIN sys.index_columns ic ON ic.object_id = c.object_id 
+						AND ic.column_id = c.column_id
+					LEFT JOIN sys.indexes i ON ic.object_id = i.object_id 
+						AND ic.index_id = i.index_id
+					WHERE c.object_id = OBJECT_ID(%s)
+					ORDER BY c.column_id
+				""", (table,))
+				
+				content += "Fields:\n"
+				for row in cursor.fetchall():
+					flags = []
+					if row[3]: flags.append("NULL")
+					if not row[3]: flags.append("NOT NULL")
+					if row[4]: flags.append("PRIMARY KEY")
+					if row[5]: flags.append("UNIQUE")
+					
+					length_info = f"({row[2]})" if row[2] != -1 else ""
+					content += f"  - {row[0]}: {row[1]}{length_info} {' '.join(flags)}\n"
+				
+				# Get foreign keys
+				cursor.execute("""
+					SELECT 
+						fk.name AS foreign_key_name,
+						cp.name AS parent_column,
+						tr.name AS referenced_table,
+						cr.name AS referenced_column
+					FROM sys.foreign_keys AS fk
+					INNER JOIN sys.foreign_key_columns AS fkc ON fk.object_id = fkc.constraint_object_id
+					INNER JOIN sys.tables AS tp ON fk.parent_object_id = tp.object_id
+					INNER JOIN sys.columns AS cp ON fkc.parent_column_id = cp.column_id AND tp.object_id = cp.object_id
+					INNER JOIN sys.tables AS tr ON fk.referenced_object_id = tr.object_id
+					INNER JOIN sys.columns AS cr ON fkc.referenced_column_id = cr.column_id AND tr.object_id = cr.object_id
+					WHERE tp.name = %s
+					ORDER BY foreign_key_name
+				""", (table,))
+				
+				relationships = cursor.fetchall()
+				if relationships:
+					content += "\nForeign Keys:\n"
+					for rel in relationships:
+						content += f"  - {rel[0]}: {rel[1]} -> {rel[2]}.{rel[3]}\n"
+				
+				content += "\n"
+			
+			cursor.close()
+			conn.close()
+			
+			# Save the content to a file
+			filename = f"schema_{database}_{frappe.utils.now().split()[0]}.txt"
+			file_url = save_file(filename, content)
+			
+			return {
+				"success": True,
+				"file_url": file_url
+			}
+		except Exception as e:
+			return {
+				"success": False,
+				"message": f"Failed to generate schema: {str(e)}"
+			}
+
+def save_file(filename, content):
+	"""Save content to a file in the site's public folder."""
+	from frappe.utils import get_files_path
+	import os
+	
+	# Create the file path
+	file_path = os.path.join(get_files_path(), filename)
+	
+	# Write the content to the file
+	with open(file_path, 'w') as f:
+		f.write(content)
+	
+	# Return the URL to access the file
+	return f"/files/{filename}"

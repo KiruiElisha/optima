@@ -2,30 +2,33 @@ import frappe
 from frappe import _
 import pymssql
 from frappe.utils import cint
+from contextlib import contextmanager
 
 def get_optima_settings():
-    """Get Optima settings."""
+    """Get Optima settings from the doctype."""
     settings = frappe.get_single("Optima Settings")
     if not settings.enabled:
         frappe.throw(_("Optima Integration is not enabled"))
     return settings
 
+@contextmanager
 def get_optima_connection():
-    """Get MSSQL connection for Optima."""
+    """Get MSSQL connection for Optima using settings from the doctype."""
     settings = get_optima_settings()
-    
+    conn = None
     try:
         conn = pymssql.connect(
             server=settings.server_ip,
-            port=cint(settings.port),
             user=settings.username,
             password=settings.get_password('password'),
-            database=settings.database_name
+            database="CONNECTOR_ORDERS",
+            port=int(settings.port),
+            as_dict=True
         )
-        return conn
-    except Exception as e:
-        frappe.log_error(f"Optima Connection Error: {str(e)}", "Optima Integration")
-        frappe.throw(_("Could not connect to Optima database. Please check settings and try again."))
+        yield conn
+    finally:
+        if conn:
+            conn.close()
 
 def test_connection():
     """Test connection to Optima database."""
@@ -45,3 +48,18 @@ def test_connection():
             "success": False,
             "message": f"Connection failed: {str(e)}"
         } 
+
+def verify_permissions(cursor):
+    """Verify user has proper permissions"""
+    try:
+        cursor.execute("""
+            SELECT HAS_PERMS_BY_NAME('CONNECTOR_ORDERS', 'SCHEMA', 'INSERT')
+        """)
+        has_insert = cursor.fetchone()[0]
+        
+        if not has_insert:
+            raise Exception("User does not have required permissions on CONNECTOR_ORDERS schema")
+            
+    except Exception as e:
+        frappe.log_error(f"Permission verification error: {str(e)}", "Optima Permissions Error")
+        raise 
