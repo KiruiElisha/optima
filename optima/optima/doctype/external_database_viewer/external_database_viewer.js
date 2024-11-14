@@ -2,7 +2,7 @@ frappe.ui.form.on('External Database Viewer', {
     refresh: function (frm) {
         frm.add_custom_button(__('Fetch Databases'), function () {
             frappe.call({
-                method: "jcmapp.jcmapp.doctype.external_database_viewer.external_database_viewer.fetch_databases",
+                method: "optima.optima.doctype.external_database_viewer.external_database_viewer.fetch_databases",
                 args: {
                     server: frm.doc.server_ip_address,
                     port: frm.doc.port,
@@ -48,7 +48,7 @@ frappe.ui.form.on('External Database Viewer', {
 // Function to display tables for the selected database
 window.showTables = function(database) {
     frappe.call({
-        method: "jcmapp.jcmapp.doctype.external_database_viewer.external_database_viewer.fetch_tables",
+        method: "optima.optima.doctype.external_database_viewer.external_database_viewer.fetch_tables",
         args: {
             server: cur_frm.doc.server_ip_address,
             port: cur_frm.doc.port,
@@ -88,7 +88,7 @@ window.showTables = function(database) {
 // Function to display columns of a selected table
 window.showColumns = function(database, table) {
     frappe.call({
-        method: "jcmapp.jcmapp.doctype.external_database_viewer.external_database_viewer.fetch_columns",
+        method: "optima.optima.doctype.external_database_viewer.external_database_viewer.fetch_columns",
         args: {
             server: cur_frm.doc.server_ip_address,
             port: cur_frm.doc.port,
@@ -150,7 +150,7 @@ window.showColumns = function(database, table) {
 // Function to fetch and display the latest 5 items from the table
 window.showLatestItems = function(database, table) {
     frappe.call({
-        method: "jcmapp.jcmapp.doctype.external_database_viewer.external_database_viewer.fetch_latest_items",
+        method: "optima.optima.doctype.external_database_viewer.external_database_viewer.fetch_latest_items",
         args: {
             server: cur_frm.doc.server_ip_address,
             port: cur_frm.doc.port,

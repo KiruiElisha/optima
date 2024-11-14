@@ -3,6 +3,7 @@ from frappe import _
 from frappe.utils.background_jobs import enqueue
 from .connection import get_optima_connection
 import random
+from datetime import datetime, timedelta
 
 @frappe.whitelist()
 def enqueue_optima_order_sync(sales_order):
@@ -29,7 +30,7 @@ def sync_sales_order_to_optima_by_name(sales_order):
 def prepare_order_header(doc, shipping_details):
     """Prepare order header data matching Optima_Orders schema."""
     return {
-        "CLIENTE": 1,  # Assuming a default customer ID; replace with actual logic if available
+        "CLIENTE": 44934,  # Assuming a default customer ID; replace with actual logic if available
         "NAZIONI_CODICE": None,
         "RIF": doc.name[:12],  # Truncate to 12 characters to match SQL type
         "RIFCLI": doc.po_no or '',
@@ -71,14 +72,14 @@ def prepare_order_line(idx, item, order_id):
     }
 
 def get_next_order_id(cursor):
-    """Get the next available order ID from OPTIMA_Orders using SQL Server specific syntax."""
-    cursor.execute("""
-        DECLARE @NextID int;
-        SELECT @NextID = ISNULL(MAX(ID_ORDINI), 0) + 1 FROM OPTIMA_Orders;
-        SELECT @NextID as next_id;
-    """)
-    row = cursor.fetchone()
-    return row[0]
+    """Get the next available order ID from OPTIMA_Orders."""
+    try:
+        cursor.execute("SELECT ISNULL(MAX(ID_ORDINI), 1000) + 1 FROM CONNECTOR_ORDERS.dbo.OPTIMA_Orders")
+        next_id = cursor.fetchone()[0]
+        return next_id
+    except Exception as e:
+        frappe.log_error(f"Error generating order ID: {str(e)}")
+        raise
 
 def create_optima_order(doc, order_id, header, shipping_details):
     """Create or update Optima Order document."""
@@ -136,13 +137,13 @@ def create_optima_order(doc, order_id, header, shipping_details):
         new_order.insert(ignore_permissions=True)
         return new_order
 
-def create_sync_log(doc, order_id, status, message=None):
+def create_sync_log(doc, operation_id, status, message=None):
     """Create Optima Sync Log entry."""
     log_data = {
         "doctype": "Optima Sync Log",
         "reference_doctype": doc.doctype,
         "reference_name": doc.name,
-        "operation_id": order_id,
+        "operation_id": operation_id,
         "user": frappe.session.user,
         "status": status,
         "message": message if message else ""
@@ -158,95 +159,153 @@ def sync_sales_order_to_optima(doc):
     
     with get_optima_connection() as conn:
         try:
-            cursor = conn.cursor(as_dict=False)
-
-            # Set transaction isolation level to ensure data consistency
-            cursor.execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            cursor = conn.cursor()
             
-            # Create sync log with "Pending" status
+            # Create sync log
             sync_log = create_sync_log(doc, None, "Pending")
             
-            # Fetch shipping address details
+            # Get shipping details with default values
             shipping_address = frappe.get_doc("Address", doc.shipping_address_name) if doc.shipping_address_name else None
             shipping_details = {
-                "address_line1": shipping_address.address_line1 if shipping_address else "",
-                "city": shipping_address.city if shipping_address else "",
-                "pincode": shipping_address.pincode if shipping_address else "",
-                "state": shipping_address.state if shipping_address else "",
-                "country": shipping_address.country if shipping_address else ""
+                "address_line1": (shipping_address.address_line1 if shipping_address else "") or "",
+                "city": (shipping_address.city if shipping_address else "") or "",
+                "pincode": (shipping_address.pincode if shipping_address else "") or "",
+                "state": (shipping_address.state if shipping_address else "") or "",
+                "country": (shipping_address.country if shipping_address else "") or ""
             }
 
-            # Start database transaction
-            cursor.execute("BEGIN TRANSACTION")
-
-            # Get next order ID with proper locking
+            # Generate order reference (12 chars max)
+            order_ref = f"S{datetime.now().strftime('%y%m%d%H%M')}"  # e.g. S2411141023
+            
+            # Insert into OPTIMA_Orders
             cursor.execute("""
-                DECLARE @NextID int;
-                SELECT @NextID = ISNULL(MAX(ID_ORDINI), 1000) + 1 
-                FROM dbo.OPTIMA_Orders WITH (TABLOCKX);
-                SELECT @NextID as next_id;
-            """)
-            order_id = cursor.fetchone()[0]
-
-            # Prepare header and insert order header
-            header = prepare_order_header(doc, shipping_details)
-            cursor.execute("""
-                INSERT INTO dbo.OPTIMA_Orders (
-                    ID_ORDINI, CLIENTE, NAZIONI_CODICE, RIF, RIFCLI, DATAORD, DATACONS, 
-                    DATAINIZIO, DATAFINE, DEF, NOTES, DESCR1_SPED, DESCR2_SPED, 
-                    INDIRI_SPED, CAP_SPED, LOCALITA_SPED, PROV_SPED, 
-                    COMMESSA_CLI, RIFINTERNO, RIFAGENTE, DESCR_TIPICAUDOC
+                INSERT INTO OPTIMA_Orders (
+                    CLIENTE, RIFCLI, DATAORD, DATACONS, DEF, NOTES, ID_ORDINI,
+                    DESCR_TIPICAUDOC, DESCR1_SPED, DESCR2_SPED, INDIRI_SPED,
+                    CAP_SPED, LOCALITA_SPED, PROV_SPED
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    1, %s, %s, %s, 'Y', %s, 1,
+                    'SALES', %s, %s, %s,
+                    %s, %s, %s
                 )
             """, (
-                order_id, header["CLIENTE"], header["NAZIONI_CODICE"], header["RIF"], 
-                header["RIFCLI"], header["DATAORD"], header["DATACONS"], 
-                header["DATAINIZIO"], header["DATAFINE"], header["DEF"], 
-                header["NOTES"], header["DESCR1_SPED"], header["DESCR2_SPED"],
-                header["INDIRI_SPED"], header["CAP_SPED"], header["LOCALITA_SPED"],
-                header["PROV_SPED"], header["COMMESSA_CLI"], header["RIFINTERNO"],
-                header["RIFAGENTE"], header["DESCR_TIPICAUDOC"]
+                order_ref,  # RIFCLI
+                doc.transaction_date,  # DATAORD
+                doc.delivery_date or (doc.transaction_date + timedelta(days=7)),  # DATACONS
+                doc.name[:64],  # NOTES
+                shipping_details["address_line1"][:40] or "",  # DESCR1_SPED
+                doc.customer_name[:40] or "",  # DESCR2_SPED
+                shipping_details["address_line1"][:64] or "",  # INDIRI_SPED
+                shipping_details["pincode"][:30] or "",  # CAP_SPED
+                shipping_details["city"][:30] or "",  # LOCALITA_SPED
+                shipping_details["state"][:30] or ""  # PROV_SPED
             ))
-
-            # Insert order lines
+            
+            # Get the ID of inserted order
+            cursor.execute("SELECT @@IDENTITY")
+            order_id = cursor.fetchone()[0]
+            
+            # Insert order lines into OPTIMA_OrderLines
             for idx, item in enumerate(doc.items, 1):
-                line = prepare_order_line(idx, item, order_id)
                 cursor.execute("""
-                    INSERT INTO dbo.OPTIMA_OrderLines (
-                        ID_ORDINI, RIGA, QTAPZ, DESCR_MAT_COMP, COD_ART_CLIENTE,
-                        DESCMAT, SAGOMA, CODICE_ANAGRAFICA, CATEGORIE, DIMXPZ,
-                        DIMYPZ, ID_UM, PRODOTTI_CODICE, isrect
+                    INSERT INTO OPTIMA_OrderLines (
+                        ID_ORDINI, RIGA, QTAPZ, DESCR_MAT_COMP,
+                        COD_ART_CLIENTE, DESCMAT, SAGOMA, CODICE_ANAGRAFICA,
+                        DIMXPZ, DIMYPZ, ID_UM, isrect, PRODOTTI_CODICE
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s,
+                        %s, %s, 'RECT', %s,
+                        %s, %s, 0, 1, %s
                     )
                 """, (
-                    line["ID_ORDINI"], line["RIGA"], line["QTAPZ"],
-                    line["DESCR_MAT_COMP"], line["COD_ART_CLIENTE"],
-                    line["DESCMAT"], line["SAGOMA"], line["CODICE_ANAGRAFICA"],
-                    line["CATEGORIE"], line["DIMXPZ"], line["DIMYPZ"],
-                    line["ID_UM"], line["PRODOTTI_CODICE"], line["isrect"]
+                    order_id,  # ID_ORDINI
+                    idx,  # RIGA
+                    int(item.qty),  # QTAPZ
+                    item.description[:512] or item.item_name[:512],  # DESCR_MAT_COMP
+                    item.item_code[:512],  # COD_ART_CLIENTE
+                    item.description[:1024] or item.item_name[:1024],  # DESCMAT
+                    item.item_code[:32],  # CODICE_ANAGRAFICA
+                    float(item.get('width', 1000)),  # DIMXPZ
+                    float(item.get('height', 2000)),  # DIMYPZ
+                    item.item_code[:32]  # PRODOTTI_CODICE
                 ))
-
-            # Verify the records were inserted
-            cursor.execute("SELECT COUNT(*) FROM dbo.OPTIMA_Orders WHERE ID_ORDINI = %s", (order_id,))
-            if cursor.fetchone()[0] == 0:
-                raise Exception("Order header was not persisted properly")
-
-            cursor.execute("SELECT COUNT(*) FROM dbo.OPTIMA_OrderLines WHERE ID_ORDINI = %s", (order_id,))
-            if cursor.fetchone()[0] != len(doc.items):
-                raise Exception("Order lines were not persisted properly")
-
-            # Commit the transaction
+            
+            # Commit transaction
             conn.commit()
 
-            # Create/Update Optima Order document
-            optima_order = create_optima_order(doc, order_id, header, shipping_details)
+            # Create or update Optima Order
+            optima_order = frappe.get_all(
+                "Optima Order",
+                filters={"sales_order": doc.name},
+                limit=1
+            )
 
-            # Update sync log with success status
-            sync_log.operation_id = order_id
-            sync_log.status = "Completed"
-            sync_log.save()
+            order_data = {
+                "sales_order": doc.name,
+                "customer": doc.customer,
+                "customer_reference": doc.po_no or "",
+                "order_date": doc.transaction_date,
+                "delivery_date": doc.delivery_date,
+                "status": "Completed",
+                "sync_status": "Completed",
+                "sync_message": f"Order synced successfully. Optima Order ID: {order_id}",
+                "order_number": order_ref,
+                "internal_reference": doc.name,
+                "agent_reference": frappe.session.user,
+                "notes": doc.name[:64],
+                "delivery_description_1": shipping_details["address_line1"][:40] or "",
+                "delivery_description_2": doc.customer_name[:40] or "",
+                "delivery_address": shipping_details["address_line1"] or "",
+                "delivery_zip": shipping_details["pincode"] or "",
+                "delivery_city": shipping_details["city"] or "",
+                "delivery_country": shipping_details["country"] or "",
+                "optima_order_id": str(order_id),
+                "optima_operation_id": str(order_id),
+                "optima_sync_details": frappe.as_json({
+                    "order_id": order_id,
+                    "order_ref": order_ref,
+                    "sync_time": str(datetime.now())
+                })
+            }
+
+            if optima_order:
+                existing_order = frappe.get_doc("Optima Order", optima_order[0].name)
+                # Clear existing items
+                existing_order.items = []
+                # Add updated items
+                for item in doc.items:
+                    existing_order.append("items", {
+                        "item_code": item.item_code,
+                        "item_name": item.item_name,
+                        "description": item.description or item.item_name,
+                        "qty": item.qty,
+                        "rate": item.rate,
+                        "amount": item.amount,
+                        "optima_sync_status": "Synced"
+                    })
+                existing_order.update(order_data)
+                existing_order.save()
+            else:
+                new_order = frappe.get_doc({
+                    "doctype": "Optima Order",
+                    **order_data,
+                    "items": [{
+                        "item_code": item.item_code,
+                        "item_name": item.item_name,
+                        "description": item.description or item.item_name,
+                        "qty": item.qty,
+                        "rate": item.rate,
+                        "amount": item.amount,
+                        "optima_sync_status": "Synced"
+                    } for item in doc.items]
+                })
+                new_order.insert()
+
+            # Update sync log
+            if sync_log:
+                sync_log.status = "Completed"
+                sync_log.operation_id = order_id
+                sync_log.save()
 
             # Update ERPNext status
             frappe.db.set_value('Sales Order', doc.name, {
@@ -255,40 +314,60 @@ def sync_sales_order_to_optima(doc):
             })
             frappe.db.commit()
 
-            return {"success": True, "order_id": order_id, "optima_order": optima_order.name}
+            return {"success": True, "order_id": order_id}
 
         except Exception as e:
             if conn:
                 conn.rollback()
             
-            error_message = str(e)
-            
             if sync_log:
                 sync_log.status = "Failed"
-                sync_log.message = error_message
+                sync_log.message = str(e)[:140]
                 sync_log.save()
-            else:
-                create_sync_log(doc, None, "Failed", error_message)
             
-            # Update Optima Order if it exists
-            existing_order = frappe.get_all(
+            # Create/Update Optima Order with error status
+            optima_order = frappe.get_all(
                 "Optima Order",
                 filters={"sales_order": doc.name},
                 limit=1
             )
-            if existing_order:
-                frappe.db.set_value('Optima Order', existing_order[0].name, {
-                    'status': 'Failed',
-                    'sync_status': 'Failed',
-                    'sync_message': error_message
+
+            error_data = {
+                "sales_order": doc.name,
+                "customer": doc.customer,
+                "status": "Failed",
+                "sync_status": "Failed",
+                "sync_message": str(e)[:140],
+                "items": [{
+                    "item_code": item.item_code,
+                    "item_name": item.item_name,
+                    "description": item.description or item.item_name,
+                    "qty": item.qty,
+                    "rate": item.rate,
+                    "amount": item.amount,
+                    "optima_sync_status": "Failed"
+                } for item in doc.items]
+            }
+
+            if optima_order:
+                existing_order = frappe.get_doc("Optima Order", optima_order[0].name)
+                existing_order.items = []
+                for item_data in error_data["items"]:
+                    existing_order.append("items", item_data)
+                existing_order.update(error_data)
+                existing_order.save()
+            else:
+                new_order = frappe.get_doc({
+                    "doctype": "Optima Order",
+                    **error_data
                 })
+                new_order.insert()
             
-            # Update Sales Order
             frappe.db.set_value('Sales Order', doc.name, {
                 'custom_optima_sync_status': 'Failed',
-                'custom_optima_sync_error': error_message
+                'custom_optima_sync_error': str(e)[:140]
             })
             frappe.db.commit()
-
+            
             raise
 

@@ -5,6 +5,7 @@ from frappe import _
 import pymssql
 from frappe.utils import cint
 from frappe.model.document import Document
+from datetime import datetime, timedelta
 
 
 class OptimaSettings(Document):
@@ -313,6 +314,67 @@ class OptimaSettings(Document):
 			return {
 				"success": False,
 				"message": f"Failed to generate schema: {str(e)}"
+			}
+
+	@frappe.whitelist()
+	def insert_test_order(self):
+		"""Insert a test order into Optima database."""
+		try:
+			conn = self.get_connection()
+			cursor = conn.cursor()
+			
+			# Generate shorter unique order reference (12 chars max for ORDINE column)
+			order_ref = f"T{datetime.now().strftime('%y%m%d%H%M')}"  # e.g. T2411141023
+			
+			# Insert into OPTIMA_Orders
+			cursor.execute("""
+				INSERT INTO OPTIMA_Orders (
+					CLIENTE, RIFCLI, DATAORD, DATACONS, DEF, NOTES, ID_ORDINI,
+					DESCR_TIPICAUDOC
+				) VALUES (
+					1, %s, %s, %s, 'Y', 'Test Order', 1,
+					'TEST'
+				)
+			""", (
+				order_ref,
+				datetime.now(),
+				datetime.now() + timedelta(days=7)
+			))
+			
+			# Get the ID of inserted order
+			cursor.execute("SELECT @@IDENTITY")
+			order_id = cursor.fetchone()[0]
+			
+			# Insert test order items
+			cursor.execute("""
+				INSERT INTO OPTIMA_OrderItems (
+					POSPZ, ID_UM, CODMAT, QTAPZ, DIMXPZ, DIMYPZ, 
+					SAGOMA, ORDINE, CLIENTE, DATACONS, RIFCLI,
+					NOTES, ID_ORDINI
+				) VALUES (
+					1, 1, 'GLASS001', 1, 1000.0, 2000.0,
+					'RECT', %s, '1', %s, %s,
+					'Test Item', %s
+				)
+			""", (
+				order_ref,
+				datetime.now() + timedelta(days=7),
+				order_ref,
+				order_id
+			))
+			
+			conn.commit()
+			cursor.close()
+			conn.close()
+			
+			return {
+				"success": True,
+				"message": f"Test order {order_ref} created successfully"
+			}
+		except Exception as e:
+			return {
+				"success": False,
+				"message": f"Failed to create test order: {str(e)}"
 			}
 
 def save_file(filename, content):

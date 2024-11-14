@@ -3,6 +3,7 @@ from frappe import _
 import pymssql
 from frappe.utils import cint
 from contextlib import contextmanager
+import time
 
 def get_optima_settings():
     """Get Optima settings from the doctype."""
@@ -13,19 +14,23 @@ def get_optima_settings():
 
 @contextmanager
 def get_optima_connection():
-    """Get MSSQL connection for Optima using settings from the doctype."""
-    settings = get_optima_settings()
+    """Get connection to Optima database."""
+    settings = frappe.get_doc("Optima Settings")
     conn = None
+    
     try:
         conn = pymssql.connect(
             server=settings.server_ip,
             user=settings.username,
             password=settings.get_password('password'),
-            database="CONNECTOR_ORDERS",
-            port=int(settings.port),
-            as_dict=True
+            database='CONNECTOR_ORDERS',
+            autocommit=False
         )
         yield conn
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise
     finally:
         if conn:
             conn.close()

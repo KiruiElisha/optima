@@ -206,6 +206,36 @@ frappe.ui.form.on("Optima Settings", {
 			d.show();
 		}).addClass('btn-primary');
 
+		// Add Insert Test Order button
+		frm.add_custom_button(__('Insert Test Order'), function() {
+			frappe.confirm(
+				'This will insert a test order into the Optima database. Continue?',
+				function() {
+					frappe.call({
+						method: 'insert_test_order',
+						doc: frm.doc,
+						freeze: true,
+						freeze_message: __('Creating test order...'),
+						callback: function(r) {
+							if (r.message && r.message.success) {
+								frappe.msgprint({
+									title: __('Success'),
+									indicator: 'green',
+									message: r.message.message
+								});
+							} else {
+								frappe.msgprint({
+									title: __('Failed'),
+									indicator: 'red',
+									message: r.message.message
+								});
+							}
+						}
+					});
+				}
+			);
+		});
+
 		if (!document.getElementById('optima-settings-style')) {
 			const style = document.createElement('style');
 			style.id = 'optima-settings-style';
